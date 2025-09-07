@@ -2,5 +2,8 @@
 name = "mofu"
 version = "0.1.0"
 edition = "2024"
-
-[dependencies]
+authors = ["Lingxuan Ye <love@lingxuan.io>"]
+repository = "https://github.com/Lingxuan-Ye/mofu"
+readme = "README.md"
+license = "MIT"
+description = "More optimistic file utilities."
