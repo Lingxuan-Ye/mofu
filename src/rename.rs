@@ -117,7 +117,7 @@ impl RenameQueue<'_> {
     pub fn rename(&mut self) -> Result<&mut Self, RenameError> {
         for entry in self.entries.iter().skip(self.renamed) {
             // Ensure that each path is either a file or a symlink,
-            // regardless of the target.
+            // regardless of what the symlink points to.
             let metadata = fs::symlink_metadata(entry.src)?;
             if !metadata.is_file() && !metadata.is_symlink() {
                 return Err(RenameError::NotFileOrSymlink(entry.src.to_path_buf()));
@@ -128,12 +128,16 @@ impl RenameQueue<'_> {
                     dst: entry.dst.to_path_buf(),
                 });
             }
+        }
+
+        for entry in self.entries.iter().skip(self.renamed) {
             if let Some(parent) = entry.dst.parent() {
                 fs::create_dir_all(parent)?;
             }
             fs::rename(entry.src, entry.dst)?;
             self.renamed += 1;
         }
+
         Ok(self)
     }
 
@@ -149,12 +153,16 @@ impl RenameQueue<'_> {
                     dst: entry.src.to_path_buf(),
                 });
             }
+        }
+
+        for entry in self.entries.iter().take(self.renamed).rev() {
             if let Some(parent) = entry.src.parent() {
                 fs::create_dir_all(parent)?;
             }
             fs::rename(entry.dst, entry.src)?;
             self.renamed -= 1;
         }
+
         Ok(self)
     }
 
