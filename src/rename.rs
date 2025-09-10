@@ -13,12 +13,12 @@ pub struct NameMap {
 
 #[derive(Debug)]
 pub struct RenameQueue<'a> {
-    entries: Vec<Entry<'a>>,
+    entries: Vec<Mapping<'a>>,
     renamed: usize,
 }
 
 #[derive(Debug)]
-pub struct Entry<'a> {
+pub struct Mapping<'a> {
     pub src: &'a Path,
     pub dst: &'a Path,
 }
@@ -26,11 +26,11 @@ pub struct Entry<'a> {
 impl TryFrom<HashMap<PathBuf, PathBuf>> for NameMap {
     type Error = RenameError;
 
-    fn try_from(value: HashMap<PathBuf, PathBuf>) -> Result<Self, Self::Error> {
-        let len = value.len();
+    fn try_from(map: HashMap<PathBuf, PathBuf>) -> Result<Self, Self::Error> {
+        let len = map.len();
         let mut rev_map: HashMap<&Path, &Path> = HashMap::with_capacity(len);
 
-        for (src, dst) in value.iter() {
+        for (src, dst) in map.iter() {
             // Ensure that each vertex has both in-degree and out-degree
             // less than or equal to 1.
             if let Some(collided) = rev_map.get(dst.as_path()) {
@@ -43,7 +43,7 @@ impl TryFrom<HashMap<PathBuf, PathBuf>> for NameMap {
         }
 
         Ok(Self {
-            entries: value,
+            entries: map,
             temp_cache: Vec::new(),
         })
     }
@@ -62,12 +62,12 @@ impl NameMap {
                 continue;
             }
             visited.insert(src);
-            walk.push_front(Entry { src, dst });
+            walk.push_front(Mapping { src, dst });
             let mut next_src = dst;
             while let Some(next_dst) = self.entries.get(next_src) {
                 visited.insert(next_src);
                 if next_dst != src {
-                    walk.push_front(Entry {
+                    walk.push_front(Mapping {
                         src: next_src,
                         dst: next_dst,
                     });
@@ -83,11 +83,11 @@ impl NameMap {
                         Box::into_raw(Box::new(temp))
                     };
                     self.temp_cache.push(temp);
-                    walk.push_front(Entry {
+                    walk.push_front(Mapping {
                         src: next_src,
                         dst: unsafe { &*temp },
                     });
-                    walk.push_back(Entry {
+                    walk.push_back(Mapping {
                         src: unsafe { &*temp },
                         dst: src,
                     });
@@ -115,26 +115,26 @@ impl Drop for NameMap {
 
 impl RenameQueue<'_> {
     pub fn rename(&mut self) -> Result<&mut Self, RenameError> {
-        for entry in self.entries.iter().skip(self.renamed) {
+        for mapping in self.entries.iter().skip(self.renamed) {
             // Ensure that each path is either a file or a symlink,
             // regardless of what the symlink points to.
-            let metadata = fs::symlink_metadata(entry.src)?;
+            let metadata = fs::symlink_metadata(mapping.src)?;
             if !metadata.is_file() && !metadata.is_symlink() {
-                return Err(RenameError::NotFileOrSymlink(entry.src.to_path_buf()));
+                return Err(RenameError::NotFileOrSymlink(mapping.src.to_path_buf()));
             }
-            if entry.dst.exists() {
+            if mapping.dst.exists() {
                 return Err(RenameError::AlreadyExists {
-                    src: entry.src.to_path_buf(),
-                    dst: entry.dst.to_path_buf(),
+                    src: mapping.src.to_path_buf(),
+                    dst: mapping.dst.to_path_buf(),
                 });
             }
         }
 
-        for entry in self.entries.iter().skip(self.renamed) {
-            if let Some(parent) = entry.dst.parent() {
+        for mapping in self.entries.iter().skip(self.renamed) {
+            if let Some(parent) = mapping.dst.parent() {
                 fs::create_dir_all(parent)?;
             }
-            fs::rename(entry.src, entry.dst)?;
+            fs::rename(mapping.src, mapping.dst)?;
             self.renamed += 1;
         }
 
@@ -142,35 +142,35 @@ impl RenameQueue<'_> {
     }
 
     pub fn revert(&mut self) -> Result<&mut Self, RenameError> {
-        for entry in self.entries.iter().take(self.renamed).rev() {
-            let metadata = fs::symlink_metadata(entry.dst)?;
+        for mapping in self.entries.iter().take(self.renamed).rev() {
+            let metadata = fs::symlink_metadata(mapping.dst)?;
             if !metadata.is_file() && !metadata.is_symlink() {
-                return Err(RenameError::NotFileOrSymlink(entry.dst.to_path_buf()));
+                return Err(RenameError::NotFileOrSymlink(mapping.dst.to_path_buf()));
             }
-            if entry.src.exists() {
+            if mapping.src.exists() {
                 return Err(RenameError::AlreadyExists {
-                    src: entry.dst.to_path_buf(),
-                    dst: entry.src.to_path_buf(),
+                    src: mapping.dst.to_path_buf(),
+                    dst: mapping.src.to_path_buf(),
                 });
             }
         }
 
-        for entry in self.entries.iter().take(self.renamed).rev() {
-            if let Some(parent) = entry.src.parent() {
+        for mapping in self.entries.iter().take(self.renamed).rev() {
+            if let Some(parent) = mapping.src.parent() {
                 fs::create_dir_all(parent)?;
             }
-            fs::rename(entry.dst, entry.src)?;
+            fs::rename(mapping.dst, mapping.src)?;
             self.renamed -= 1;
         }
 
         Ok(self)
     }
 
-    pub fn renamed(&self) -> &[Entry<'_>] {
+    pub fn renamed(&self) -> &[Mapping<'_>] {
         &self.entries[..self.renamed]
     }
 
-    pub fn pending(&self) -> &[Entry<'_>] {
+    pub fn pending(&self) -> &[Mapping<'_>] {
         &self.entries[self.renamed..]
     }
 }
