@@ -115,26 +115,21 @@ impl Drop for NameMap {
 
 impl RenameQueue<'_> {
     pub fn rename(&mut self) -> Result<&mut Self, RenameError> {
-        for mapping in self.entries.iter().skip(self.renamed) {
+        let iter = self.entries.iter().skip(self.renamed);
+
+        for mapping in iter.clone() {
             // Ensure that each path is either a file or a symlink,
             // regardless of what the symlink points to.
-            let metadata = fs::symlink_metadata(mapping.src)?;
-            if !metadata.is_file() && !metadata.is_symlink() {
-                return Err(RenameError::NotFileOrSymlink(mapping.src.to_path_buf()));
-            }
-            if mapping.dst.exists() {
-                return Err(RenameError::AlreadyExists {
-                    src: mapping.src.to_path_buf(),
-                    dst: mapping.dst.to_path_buf(),
-                });
-            }
+            //
+            // This check should take place no earlier than here, as
+            // it minimizes the window for races. Still, concurrent
+            // filesystem access during this function call may lead
+            // to inconsistent states.
+            mapping.validate()?;
         }
 
-        for mapping in self.entries.iter().skip(self.renamed) {
-            if let Some(parent) = mapping.dst.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::rename(mapping.src, mapping.dst)?;
+        for mapping in iter {
+            mapping.rename()?;
             self.renamed += 1;
         }
 
@@ -142,27 +137,22 @@ impl RenameQueue<'_> {
     }
 
     pub fn revert(&mut self) -> Result<&mut Self, RenameError> {
-        for mapping in self.entries.iter().take(self.renamed).rev() {
-            let metadata = fs::symlink_metadata(mapping.dst)?;
-            if !metadata.is_file() && !metadata.is_symlink() {
-                return Err(RenameError::NotFileOrSymlink(mapping.dst.to_path_buf()));
-            }
-            if mapping.src.exists() {
-                return Err(RenameError::AlreadyExists {
-                    src: mapping.dst.to_path_buf(),
-                    dst: mapping.src.to_path_buf(),
-                });
-            }
+        let iter = self
+            .entries
+            .iter()
+            .take(self.renamed)
+            .rev()
+            .map(Mapping::invert);
+
+        for mapping in iter.clone() {
+            mapping.validate()?;
         }
 
-        for mapping in self.entries.iter().take(self.renamed).rev() {
-            if let Some(parent) = mapping.src.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::rename(mapping.dst, mapping.src)?;
+        for mapping in iter {
+            mapping.rename()?;
             self.renamed -= 1;
         }
-
+        
         Ok(self)
     }
 
@@ -172,6 +162,39 @@ impl RenameQueue<'_> {
 
     pub fn pending(&self) -> &[Mapping<'_>] {
         &self.entries[self.renamed..]
+    }
+}
+
+impl Mapping<'_> {
+    fn validate(&self) -> Result<(), RenameError> {
+        let metadata = fs::symlink_metadata(self.src)?;
+        if !metadata.is_file() && !metadata.is_symlink() {
+            return Err(RenameError::NotFileOrSymlink(self.src.to_path_buf()));
+        }
+
+        if self.dst.exists() {
+            return Err(RenameError::AlreadyExists {
+                src: self.src.to_path_buf(),
+                dst: self.dst.to_path_buf(),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn rename(&self) -> Result<(), RenameError> {
+        if let Some(parent) = self.src.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::rename(self.dst, self.src)?;
+        Ok(())
+    }
+
+    fn invert(&self) -> Self {
+        Self {
+            src: self.dst,
+            dst: self.src,
+        }
     }
 }
 
