@@ -1,30 +1,21 @@
 use std::fs;
-use std::fs::DirEntry;
+use std::fs::{DirEntry, FileType, Metadata};
 use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
 
-pub fn walk_dir<P>(
-    dir: P,
-    yield_file: bool,
-    yield_dir: bool,
-    yield_symlink: bool,
-) -> Result<WalkDir, Error>
+pub fn walk_dir<P>(dir: P) -> Result<WalkDir, Error>
 where
     P: AsRef<Path>,
 {
-    let mut iter = WalkDir::new(dir)?;
-    iter.yield_file = yield_file;
-    iter.yield_dir = yield_dir;
-    iter.yield_symlink = yield_symlink;
-    Ok(iter)
+    WalkDir::new(dir)
 }
 
 #[derive(Debug)]
-pub struct WalkDir {
-    stack: Vec<Result<DirEntry, Error>>,
-    yield_file: bool,
-    yield_dir: bool,
-    yield_symlink: bool,
+pub struct WalkDir(Vec<Result<DirEntry, Error>>);
+
+pub struct Entry {
+    path: PathBuf,
+    metadata: Metadata,
 }
 
 impl WalkDir {
@@ -32,60 +23,53 @@ impl WalkDir {
     where
         P: AsRef<Path>,
     {
-        Ok(Self {
-            stack: fs::read_dir(dir)?.collect(),
-            yield_file: true,
-            yield_dir: false,
-            yield_symlink: false,
-        })
-    }
-
-    pub fn yield_file(mut self, value: bool) -> Self {
-        self.yield_file = value;
-        self
-    }
-
-    pub fn yield_dir(mut self, value: bool) -> Self {
-        self.yield_dir = value;
-        self
-    }
-
-    pub fn yield_symlink(mut self, value: bool) -> Self {
-        self.yield_symlink = value;
-        self
+        Ok(Self(fs::read_dir(dir)?.collect()))
     }
 }
 
 impl Iterator for WalkDir {
-    type Item = Result<PathBuf, Error>;
+    type Item = Result<Entry, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let entry = match self.stack.pop()? {
+        let entry = match self.0.pop()? {
+            Err(error) => return Some(Err(error)),
+            Ok(entry) => entry,
+        };
+        let path = entry.path();
+        let metadata = match fs::symlink_metadata(&path) {
+            Err(error) => return Some(Err(error)),
+            Ok(metadata) => metadata,
+        };
+        // Do not use `fs::DirEntry::file_type` here. Although it does not
+        // follow symlinks, it may be a cached value that is out of date.
+        // In that case, the path passed to `fs::read_dir` may still be a
+        // symlink.
+        if metadata.is_dir() {
+            match fs::read_dir(&path) {
+                // Yes, this branch is reachable.
+                Err(error) if error.kind() == ErrorKind::NotADirectory => (),
                 Err(error) => return Some(Err(error)),
-                Ok(entry) => entry,
-            };
-            let file_type = match entry.file_type() {
-                Err(error) => return Some(Err(error)),
-                Ok(file_type) => file_type,
-            };
-            let path = entry.path();
-            if (file_type.is_file() && self.yield_file)
-                || (file_type.is_symlink() && self.yield_symlink)
-            {
-                return Some(Ok(path));
-            }
-            if file_type.is_dir() {
-                match fs::read_dir(&path) {
-                    // Yes, this arm is reachable.
-                    Err(error) if error.kind() == ErrorKind::NotADirectory => continue,
-                    Err(error) => return Some(Err(error)),
-                    Ok(iter) => self.stack.extend(iter),
-                }
-                if self.yield_dir {
-                    return Some(Ok(path));
-                };
+                Ok(iter) => self.0.extend(iter),
             }
         }
+        Some(Ok(Entry { path, metadata }))
+    }
+}
+
+impl Entry {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+
+    pub fn file_type(&self) -> FileType {
+        self.metadata.file_type()
+    }
+
+    pub fn into_path_buf(self) -> PathBuf {
+        self.path
     }
 }
