@@ -3,6 +3,17 @@ use std::fs::{DirEntry, FileType, Metadata};
 use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
 
+/// Returns a [`WalkDir`] that recursively traverses all entries
+/// in `dir`.
+///
+/// # Errors
+///
+/// This function will return an error in the following situations,
+/// but is not limited to just these cases:
+///
+/// - The provided path doesn't exist.
+/// - The process lacks permissions to view the contents.
+/// - The path points at a non-directory file.
 pub fn walk_dir<P>(dir: P) -> Result<WalkDir, Error>
 where
     P: AsRef<Path>,
@@ -10,15 +21,32 @@ where
     WalkDir::new(dir)
 }
 
+/// An iterator that recursively traverses all entries in a directory.
 #[derive(Debug)]
 pub struct WalkDir(Vec<Result<DirEntry, Error>>);
 
+/// A directory entry returned by [`WalkDir`].
+///
+/// Each entry provides a path along with cached metadata to help avoid
+/// redundant system calls. However, due to possible concurrent file
+/// access, the cached metadata may degrade in validity over time.
 pub struct Entry {
     path: PathBuf,
     metadata: Metadata,
 }
 
 impl WalkDir {
+    /// Returns a [`WalkDir`] that recursively traverses all entries
+    /// in `dir`.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error in the following situations,
+    /// but is not limited to just these cases:
+    ///
+    /// - The provided path doesn't exist.
+    /// - The process lacks permissions to view the contents.
+    /// - The path points at a non-directory file.
     pub fn new<P>(dir: P) -> Result<Self, Error>
     where
         P: AsRef<Path>,
@@ -57,14 +85,24 @@ impl Iterator for WalkDir {
 }
 
 impl Entry {
+    /// Returns the path of this entry.
     pub fn path(&self) -> &Path {
         &self.path
     }
 
+    /// Returns the cached metadata for this entry.
+    ///
+    /// Due to possible concurrent file access, the cached metadata
+    /// may degrade in validity over time. In addition, it does not
+    /// follow symlinks.
     pub fn metadata(&self) -> &Metadata {
         &self.metadata
     }
 
+    /// Returns the cached file type of this entry.
+    ///
+    /// This is derived from the cached metadata, which may degrade
+    /// in validity over time.
     pub fn file_type(&self) -> FileType {
         self.metadata.file_type()
     }
