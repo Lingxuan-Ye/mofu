@@ -68,8 +68,10 @@ impl Entry {
     pub fn file_type(&self) -> FileType {
         self.metadata.file_type()
     }
+}
 
-    pub fn into_path_buf(self) -> PathBuf {
-        self.path
+impl From<Entry> for PathBuf {
+    fn from(value: Entry) -> Self {
+        value.path
     }
 }
