@@ -1,10 +1,11 @@
 use std::fs;
 use std::fs::{DirEntry, FileType, Metadata};
 use std::io::{Error, ErrorKind};
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 /// Returns a [`WalkDir`] that recursively traverses all entries
-/// in `dir`.
+/// in `dir`, skipping errors.
 ///
 /// # Errors
 ///
@@ -14,7 +15,7 @@ use std::path::{Path, PathBuf};
 /// - The provided path doesn't exist.
 /// - The process lacks permissions to view the contents.
 /// - The path points at a non-directory file.
-pub fn walk_dir<P>(dir: P) -> Result<WalkDir, Error>
+pub fn walk_dir<P>(dir: P) -> Result<WalkDir<SkipError>, Error>
 where
     P: AsRef<Path>,
 {
@@ -23,7 +24,18 @@ where
 
 /// An iterator that recursively traverses all entries in a directory.
 #[derive(Debug)]
-pub struct WalkDir(Vec<Result<DirEntry, Error>>);
+pub struct WalkDir<Policy> {
+    stack: Vec<Result<DirEntry, Error>>,
+    policy: PhantomData<Policy>,
+}
+
+/// A [`WalkDir`] policy that keeps errors during iteration.
+#[derive(Debug)]
+pub struct KeepError;
+
+/// A [`WalkDir`] policy that skips errors during iteration.
+#[derive(Debug)]
+pub struct SkipError;
 
 /// A directory entry returned by [`WalkDir`].
 ///
@@ -35,9 +47,14 @@ pub struct Entry {
     metadata: Metadata,
 }
 
-impl WalkDir {
+impl<Policy> WalkDir<Policy> {
     /// Returns a [`WalkDir`] that recursively traverses all entries
     /// in `dir`.
+    ///
+    /// # Available Policies
+    ///
+    /// - [`KeepError`]
+    /// - [`SkipError`]
     ///
     /// # Errors
     ///
@@ -51,15 +68,18 @@ impl WalkDir {
     where
         P: AsRef<Path>,
     {
-        Ok(Self(fs::read_dir(dir)?.collect()))
+        Ok(Self {
+            stack: fs::read_dir(dir)?.collect(),
+            policy: PhantomData,
+        })
     }
 }
 
-impl Iterator for WalkDir {
+impl Iterator for WalkDir<KeepError> {
     type Item = Result<Entry, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let entry = match self.0.pop()? {
+        let entry = match self.stack.pop()? {
             Err(error) => return Some(Err(error)),
             Ok(entry) => entry,
         };
@@ -77,10 +97,36 @@ impl Iterator for WalkDir {
                 // Yes, this branch is reachable.
                 Err(error) if error.kind() == ErrorKind::NotADirectory => (),
                 Err(error) => return Some(Err(error)),
-                Ok(iter) => self.0.extend(iter),
+                Ok(iter) => self.stack.extend(iter),
             }
         }
         Some(Ok(Entry { path, metadata }))
+    }
+}
+
+impl Iterator for WalkDir<SkipError> {
+    type Item = Entry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let entry = match self.stack.pop()? {
+                Err(_) => continue,
+                Ok(entry) => entry,
+            };
+            let path = entry.path();
+            let metadata = match fs::symlink_metadata(&path) {
+                Err(_) => continue,
+                Ok(metadata) => metadata,
+            };
+            if metadata.is_dir() {
+                match fs::read_dir(&path) {
+                    Err(error) if error.kind() == ErrorKind::NotADirectory => (),
+                    Err(_) => continue,
+                    Ok(iter) => self.stack.extend(iter),
+                }
+            }
+            return Some(Entry { path, metadata });
+        }
     }
 }
 
