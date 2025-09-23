@@ -115,44 +115,24 @@ impl Drop for NameMap {
 
 impl RenameQueue<'_> {
     pub fn rename(&mut self) -> Result<&mut Self, RenameError> {
-        let iter = self.entries.iter().skip(self.renamed);
-
-        for mapping in iter.clone() {
-            // Ensure that each path is either a file or a symlink,
-            // regardless of what the symlink points to.
-            //
-            // This check should take place no earlier than here, as
-            // it minimizes the window for races. Still, concurrent
-            // filesystem access during this function call may lead
-            // to inconsistent states.
-            mapping.validate()?;
-        }
-
-        for mapping in iter {
+        for mapping in self.entries.iter().skip(self.renamed) {
             mapping.rename()?;
             self.renamed += 1;
         }
-
         Ok(self)
     }
 
     pub fn revert(&mut self) -> Result<&mut Self, RenameError> {
-        let iter = self
+        for mapping in self
             .entries
             .iter()
             .take(self.renamed)
             .rev()
-            .map(Mapping::invert);
-
-        for mapping in iter.clone() {
-            mapping.validate()?;
-        }
-
-        for mapping in iter {
+            .map(Mapping::invert)
+        {
             mapping.rename()?;
             self.renamed -= 1;
         }
-        
         Ok(self)
     }
 
@@ -166,23 +146,13 @@ impl RenameQueue<'_> {
 }
 
 impl Mapping<'_> {
-    fn validate(&self) -> Result<(), RenameError> {
-        let metadata = fs::symlink_metadata(self.src)?;
-        if !metadata.is_file() && !metadata.is_symlink() {
-            return Err(RenameError::NotFileOrSymlink(self.src.to_path_buf()));
-        }
-
+    fn rename(&self) -> Result<(), RenameError> {
         if self.dst.exists() {
             return Err(RenameError::AlreadyExists {
                 src: self.src.to_path_buf(),
                 dst: self.dst.to_path_buf(),
             });
         }
-
-        Ok(())
-    }
-
-    fn rename(&self) -> Result<(), RenameError> {
         if let Some(parent) = self.src.parent() {
             fs::create_dir_all(parent)?;
         }
