@@ -1,6 +1,6 @@
 use std::fs;
 use std::fs::{DirEntry, FileType, Metadata};
-use std::io::{Error, ErrorKind};
+use std::io;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 /// - The provided path doesn't exist.
 /// - The process lacks permissions to view the contents.
 /// - The path points at a non-directory file.
-pub fn walk_dir<P>(dir: P) -> Result<WalkDir<SkipError>, Error>
+pub fn walk_dir<P>(dir: P) -> Result<WalkDir<SkipError>, io::Error>
 where
     P: AsRef<Path>,
 {
@@ -25,7 +25,7 @@ where
 /// An iterator that recursively traverses all entries in a directory.
 #[derive(Debug)]
 pub struct WalkDir<Policy> {
-    stack: Vec<Result<DirEntry, Error>>,
+    stack: Vec<Result<DirEntry, io::Error>>,
     policy: PhantomData<Policy>,
 }
 
@@ -64,7 +64,7 @@ impl<Policy> WalkDir<Policy> {
     /// - The provided path doesn't exist.
     /// - The process lacks permissions to view the contents.
     /// - The path points at a non-directory file.
-    pub fn new<P>(dir: P) -> Result<Self, Error>
+    pub fn new<P>(dir: P) -> Result<Self, io::Error>
     where
         P: AsRef<Path>,
     {
@@ -76,7 +76,7 @@ impl<Policy> WalkDir<Policy> {
 }
 
 impl Iterator for WalkDir<KeepError> {
-    type Item = Result<Entry, Error>;
+    type Item = Result<Entry, io::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let entry = match self.stack.pop()? {
@@ -95,7 +95,7 @@ impl Iterator for WalkDir<KeepError> {
         if metadata.is_dir() {
             match fs::read_dir(&path) {
                 // Yes, this branch is reachable.
-                Err(error) if error.kind() == ErrorKind::NotADirectory => (),
+                Err(error) if error.kind() == io::ErrorKind::NotADirectory => (),
                 Err(error) => return Some(Err(error)),
                 Ok(iter) => self.stack.extend(iter),
             }
@@ -120,7 +120,7 @@ impl Iterator for WalkDir<SkipError> {
             };
             if metadata.is_dir() {
                 match fs::read_dir(&path) {
-                    Err(error) if error.kind() == ErrorKind::NotADirectory => (),
+                    Err(error) if error.kind() == io::ErrorKind::NotADirectory => (),
                     Err(_) => continue,
                     Ok(iter) => self.stack.extend(iter),
                 }
