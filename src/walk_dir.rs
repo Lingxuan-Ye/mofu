@@ -88,10 +88,10 @@ impl Iterator for WalkDir<KeepError> {
             Err(error) => return Some(Err(error)),
             Ok(metadata) => metadata,
         };
-        // Do not use `fs::DirEntry::file_type` here. Although it does not
+        // Do not use `DirEntry::file_type` here. Although it does not
         // follow symlinks, it may be a cached value that is out of date.
-        // In that case, the path passed to `fs::read_dir` may still be a
-        // symlink.
+        // In that case, the path passed to `fs::read_dir` may still be
+        // a symlink.
         if metadata.is_dir() {
             match fs::read_dir(&path) {
                 // Yes, this branch is reachable.
