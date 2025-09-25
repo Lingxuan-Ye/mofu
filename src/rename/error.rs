@@ -16,9 +16,9 @@ pub enum Error {
         dst: PathBuf,
     },
 
-    AtomicFailed {
-        rename: Box<Self>,
-        revert: Option<Box<Self>>,
+    AtomicActionFailed {
+        during_attempt: Box<Self>,
+        during_rollback: Option<Box<Self>>,
     },
 }
 
@@ -50,15 +50,15 @@ impl fmt::Display for Error {
                 writeln!(f, "{INDENT}dst: {}", dst.display())?;
             }
 
-            Self::AtomicFailed { rename, revert } => {
-                writeln!(f, "atomic rename failed:")?;
-                writeln!(f, "{INDENT}on rename:")?;
-                for line in rename.to_string().lines() {
+            Self::AtomicActionFailed { during_attempt, during_rollback } => {
+                writeln!(f, "atomic action failed:")?;
+                writeln!(f, "{INDENT}during attempt:")?;
+                for line in during_attempt.to_string().lines() {
                     writeln!(f, "{INDENT}{INDENT}{line}")?;
                 }
-                if let Some(revert) = revert {
-                    writeln!(f, "{INDENT}on revert:")?;
-                    for line in revert.to_string().lines() {
+                if let Some(during_rollback) = during_rollback {
+                    writeln!(f, "{INDENT}during rollback:")?;
+                    for line in during_rollback.to_string().lines() {
                         writeln!(f, "{INDENT}{INDENT}{line}")?;
                     }
                 }

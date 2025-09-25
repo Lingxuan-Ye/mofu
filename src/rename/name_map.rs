@@ -89,9 +89,21 @@ impl NameMap {
 
     pub fn rename_atomic(&mut self) -> Result<&mut Self, Error> {
         if let Err(error) = self.rename() {
-            let rename = Box::new(error);
-            let revert = self.revert().err().map(Box::new);
-            Err(Error::AtomicFailed { rename, revert })
+            Err(Error::AtomicActionFailed {
+                during_attempt: Box::new(error),
+                during_rollback: self.revert().err().map(Box::new),
+            })
+        } else {
+            Ok(self)
+        }
+    }
+
+    pub fn revert_atomic(&mut self) -> Result<&mut Self, Error> {
+        if let Err(error) = self.revert() {
+            Err(Error::AtomicActionFailed {
+                during_attempt: Box::new(error),
+                during_rollback: self.rename().err().map(Box::new),
+            })
         } else {
             Ok(self)
         }
