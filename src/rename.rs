@@ -14,80 +14,19 @@ pub struct RenameQueue {
 }
 
 impl RenameQueue {
-    pub fn resolve<I>(map: I) -> Result<Self, Error>
+    pub fn try_from_map(map: HashMap<Rc<PathBuf>, Rc<PathBuf>>) -> Result<Self, Error> {
+        Self::try_from(map)
+    }
+
+    pub fn try_from_iter<I>(iter: I) -> Result<Self, Error>
     where
         I: IntoIterator<Item = Mapping>,
     {
-        let map: HashMap<Rc<PathBuf>, Rc<PathBuf>> = map
+        let map = iter
             .into_iter()
             .map(|mapping| (mapping.src, mapping.dst))
             .collect();
-        let len = map.len();
-
-        let mut rev_map: HashMap<&Path, &Path> = HashMap::with_capacity(len);
-        for (src, dst) in map.iter() {
-            // Ensure that each vertex has both in-degree and out-degree
-            // less than or equal to 1.
-            if let Some(collided) = rev_map.get(dst.as_path()) {
-                return Err(Error::ManyToOne {
-                    src: (collided.to_path_buf(), src.to_path_buf()),
-                    dst: dst.to_path_buf(),
-                });
-            }
-            rev_map.insert(dst, src);
-        }
-        drop(rev_map);
-
-        let mut visited = HashSet::with_capacity(len);
-        let mut graph = Vec::with_capacity(len);
-        // May not be a complete component but a partially truncated path.
-        let mut walk = VecDeque::with_capacity(len);
-
-        for (src, dst) in map.iter() {
-            if src == dst || visited.contains(src) {
-                continue;
-            }
-            visited.insert(Rc::clone(src));
-            walk.push_front(Mapping {
-                src: Rc::clone(src),
-                dst: Rc::clone(dst),
-            });
-            let mut next_src = dst;
-            while let Some(next_dst) = map.get(next_src) {
-                visited.insert(Rc::clone(next_src));
-                if next_dst != src {
-                    walk.push_front(Mapping {
-                        src: Rc::clone(next_src),
-                        dst: Rc::clone(next_dst),
-                    });
-                } else {
-                    let mut temp = next_src.to_path_buf();
-                    for i in 0.. {
-                        temp.set_extension(format!("temp_{i}"));
-                        if !temp.exists() {
-                            break;
-                        }
-                    }
-                    let temp = Rc::new(temp);
-                    walk.push_front(Mapping {
-                        src: Rc::clone(next_src),
-                        dst: Rc::clone(&temp),
-                    });
-                    walk.push_back(Mapping {
-                        src: temp,
-                        dst: Rc::clone(src),
-                    });
-                    break;
-                }
-                next_src = next_dst;
-            }
-            graph.extend(walk.drain(..));
-        }
-
-        Ok(Self {
-            entries: graph,
-            renamed: 0,
-        })
+        Self::try_from_map(map)
     }
 
     pub fn rename_atomic(&mut self) -> Result<&mut Self, Error> {
@@ -140,6 +79,88 @@ impl RenameQueue {
 
     pub fn pending(&self) -> &[Mapping] {
         &self.entries[self.renamed..]
+    }
+}
+
+impl TryFrom<HashMap<Rc<PathBuf>, Rc<PathBuf>>> for RenameQueue {
+    type Error = Error;
+
+    fn try_from(map: HashMap<Rc<PathBuf>, Rc<PathBuf>>) -> Result<Self, Self::Error> {
+        let mut capacity = map.len();
+
+        let mut rev_map: HashMap<&Path, &Path> = HashMap::with_capacity(capacity);
+        for (src, dst) in map.iter() {
+            // Ensure that each vertex has both in-degree and out-degree
+            // less than or equal to 1.
+            if let Some(collided) = rev_map.get(dst.as_path()) {
+                return Err(Error::ManyToOne {
+                    src: (collided.to_path_buf(), src.to_path_buf()),
+                    dst: dst.to_path_buf(),
+                });
+            }
+            // There is no need to reserve capacity for self-loops, as they
+            // are treated as noops. However, they should still be considered
+            // in collision detection.
+            if src == dst {
+                capacity -= 1;
+            }
+            rev_map.insert(dst, src);
+        }
+        drop(rev_map);
+
+        let mut visited = HashSet::with_capacity(capacity);
+        let mut graph = Vec::with_capacity(capacity);
+        // In the extreme case where the whole graph is a cycle, one additional
+        // capacity is needed for the temporary path. Additionally, `walk` may
+        // represent a partially truncated path rather than a complete component,
+        // which does not affect correctness.
+        let mut walk = VecDeque::with_capacity(capacity + 1);
+
+        for (src, dst) in map.iter() {
+            if src == dst || visited.contains(src) {
+                continue;
+            }
+            visited.insert(Rc::clone(src));
+            walk.push_front(Mapping {
+                src: Rc::clone(src),
+                dst: Rc::clone(dst),
+            });
+            let mut next_src = dst;
+            while let Some(next_dst) = map.get(next_src) {
+                visited.insert(Rc::clone(next_src));
+                if next_dst != src {
+                    walk.push_front(Mapping {
+                        src: Rc::clone(next_src),
+                        dst: Rc::clone(next_dst),
+                    });
+                } else {
+                    let mut temp = next_src.to_path_buf();
+                    for i in 0.. {
+                        temp.set_extension(format!("temp_{i}"));
+                        if !temp.exists() {
+                            break;
+                        }
+                    }
+                    let temp = Rc::new(temp);
+                    walk.push_front(Mapping {
+                        src: Rc::clone(next_src),
+                        dst: Rc::clone(&temp),
+                    });
+                    walk.push_back(Mapping {
+                        src: temp,
+                        dst: Rc::clone(src),
+                    });
+                    break;
+                }
+                next_src = next_dst;
+            }
+            graph.extend(walk.drain(..));
+        }
+
+        Ok(Self {
+            entries: graph,
+            renamed: 0,
+        })
     }
 }
 
