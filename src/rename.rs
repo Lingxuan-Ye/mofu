@@ -109,11 +109,13 @@ impl TryFrom<HashMap<Rc<PathBuf>, Rc<PathBuf>>> for RenameQueue {
         drop(rev_map);
 
         let mut visited = HashSet::with_capacity(capacity);
-        let mut graph = Vec::with_capacity(capacity);
-        // In the extreme case where the whole graph is a cycle, one additional
-        // capacity is needed for the temporary path. Additionally, `walk` may
-        // represent a partially truncated path rather than a complete component,
-        // which does not affect correctness.
+        // In the extreme case where every two mappings form a cycle, one
+        // extra slot is needed for each temporary path.
+        let mut graph = Vec::with_capacity(capacity / 2 * 3 + capacity % 2);
+        // In the extreme case where the whole graph forms a cycle, one
+        // extra slot is needed for the temporary path. Additionally,
+        // `walk` may represent a partially truncated path rather than
+        // a complete component, which does not affect correctness.
         let mut walk = VecDeque::with_capacity(capacity + 1);
 
         for (src, dst) in map.iter() {
