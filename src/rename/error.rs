@@ -50,7 +50,10 @@ impl fmt::Display for Error {
                 writeln!(f, "{INDENT}dst: {}", dst.display())?;
             }
 
-            Self::AtomicActionFailed { during_attempt, during_rollback } => {
+            Self::AtomicActionFailed {
+                during_attempt,
+                during_rollback,
+            } => {
                 writeln!(f, "atomic action failed:")?;
                 writeln!(f, "{INDENT}during attempt:")?;
                 for line in during_attempt.to_string().lines() {
