@@ -28,22 +28,30 @@ impl RenameQueue {
     }
 
     pub fn rename_atomic(&mut self) -> Result<&mut Self, Error> {
-        if let Err(error) = self.rename() {
-            Err(Error::AtomicActionFailed {
-                during_attempt: Box::new(error),
-                during_rollback: self.revert().err().map(Box::new),
-            })
+        if let Err(rename_error) = self.rename() {
+            if let Err(revert_error) = self.revert() {
+                Err(Error::AtomicActionFailed {
+                    during_attempt: Box::new(rename_error),
+                    during_rollback: Box::new(revert_error),
+                })
+            } else {
+                Err(rename_error)
+            }
         } else {
             Ok(self)
         }
     }
 
     pub fn revert_atomic(&mut self) -> Result<&mut Self, Error> {
-        if let Err(error) = self.revert() {
-            Err(Error::AtomicActionFailed {
-                during_attempt: Box::new(error),
-                during_rollback: self.rename().err().map(Box::new),
-            })
+        if let Err(revert_error) = self.revert() {
+            if let Err(rename_error) = self.rename() {
+                Err(Error::AtomicActionFailed {
+                    during_attempt: Box::new(revert_error),
+                    during_rollback: Box::new(rename_error),
+                })
+            } else {
+                Err(revert_error)
+            }
         } else {
             Ok(self)
         }
@@ -226,7 +234,7 @@ pub enum Error {
 
     AtomicActionFailed {
         during_attempt: Box<Self>,
-        during_rollback: Option<Box<Self>>,
+        during_rollback: Box<Self>,
     },
 }
 
@@ -267,11 +275,9 @@ impl fmt::Display for Error {
                 for line in during_attempt.to_string().lines() {
                     writeln!(f, "{INDENT}{INDENT}{line}")?;
                 }
-                if let Some(during_rollback) = during_rollback {
-                    writeln!(f, "{INDENT}during rollback:")?;
-                    for line in during_rollback.to_string().lines() {
-                        writeln!(f, "{INDENT}{INDENT}{line}")?;
-                    }
+                writeln!(f, "{INDENT}during rollback:")?;
+                for line in during_rollback.to_string().lines() {
+                    writeln!(f, "{INDENT}{INDENT}{line}")?;
                 }
             }
         }
