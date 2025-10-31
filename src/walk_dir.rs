@@ -1,7 +1,7 @@
 //! Tools for directory traversal.
 
 use crate::path::{AsPath, Path, PathBuf};
-use std::fs::{self, DirEntry, Metadata};
+use std::fs::{DirEntry, Metadata, ReadDir, read_dir};
 use std::io::{Error, ErrorKind, Result};
 use std::num::NonZero;
 
@@ -74,8 +74,10 @@ impl WalkDir {
     where
         P: AsPath,
     {
-        let path = path.as_path();
-        let stack = fs::read_dir(path)?.map(StackItem::from_top_level).collect();
+        let depth = unsafe { NonZero::new_unchecked(1) };
+        let iter = read_dir(path.as_path())?;
+        let item = StackItem { depth, iter };
+        let stack = vec![item];
         let max_depth = None;
         Ok(Self { stack, max_depth })
     }
@@ -91,34 +93,34 @@ impl Iterator for WalkDir {
     type Item = Result<Entry>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let item = self.stack.pop()?;
-        let entry = match item.entry {
+        let (depth, entry) = loop {
+            let item = self.stack.last_mut()?;
+            match item.iter.next() {
+                None => self.stack.pop(),
+                Some(Err(error)) => return Some(Err(error)),
+                Some(Ok(entry)) => break (item.depth, entry),
+            };
+        };
+
+        let entry = match Entry::try_from(entry) {
             Err(error) => return Some(Err(error)),
             Ok(entry) => entry,
         };
-        let entry = match Entry::try_from(entry.path()) {
-            Err(error) => return Some(Err(error)),
-            Ok(entry) => entry,
-        };
-        if entry.is_dir()
-            && self
-                .max_depth
-                .is_none_or(|max_depth| item.depth < max_depth)
-        {
-            match fs::read_dir(entry.path()) {
+
+        if entry.is_dir() && self.max_depth.is_none_or(|max_depth| depth < max_depth) {
+            match read_dir(entry.path()) {
                 // Yes, this branch is still reachable.
                 Err(error) if error.kind() == ErrorKind::NotADirectory => (),
                 Err(error) => return Some(Err(error)),
                 Ok(iter) => {
-                    self.stack.extend(iter.map(|entry| {
-                        // Will not wrap around because `item.depth < max_depth`.
-                        let depth = item.depth.get() + 1;
-                        let depth = unsafe { NonZero::new_unchecked(depth) };
-                        StackItem { depth, entry }
-                    }));
+                    // Will not overflow because `depth < max_depth`.
+                    let depth = unsafe { NonZero::new_unchecked(depth.get() + 1) };
+                    let item = StackItem { depth, iter };
+                    self.stack.push(item);
                 }
             }
         }
+
         Some(Ok(entry))
     }
 }
@@ -177,6 +179,17 @@ impl Entry {
     }
 }
 
+impl TryFrom<DirEntry> for Entry {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: DirEntry) -> Result<Self> {
+        let path = value.path();
+        let metadata = value.metadata()?;
+        Ok(Self { path, metadata })
+    }
+}
+
 impl TryFrom<PathBuf> for Entry {
     type Error = Error;
 
@@ -227,12 +240,5 @@ impl AsPath for Entry {
 #[derive(Debug)]
 struct StackItem {
     depth: NonZero<usize>,
-    entry: Result<DirEntry>,
-}
-
-impl StackItem {
-    fn from_top_level(entry: Result<DirEntry>) -> Self {
-        let depth = unsafe { NonZero::new_unchecked(1) };
-        Self { depth, entry }
-    }
+    iter: ReadDir,
 }
