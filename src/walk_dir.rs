@@ -153,24 +153,6 @@ impl Entry {
     pub fn metadata(&self) -> &Metadata {
         &self.metadata
     }
-
-    /// Returns `true` if the cached metadata is for a directory.
-    #[inline]
-    pub fn is_dir(&self) -> bool {
-        self.metadata.is_dir()
-    }
-
-    /// Returns `true` if the cached metadata is for a regular file.
-    #[inline]
-    pub fn is_file(&self) -> bool {
-        self.metadata.is_file()
-    }
-
-    /// Returns `true` if the cached metadata is for a symbolic link.
-    #[inline]
-    pub fn is_symlink(&self) -> bool {
-        self.metadata.is_symlink()
-    }
 }
 
 impl TryFrom<DirEntry> for Entry {
@@ -228,7 +210,7 @@ impl AsPath for Entry {
     /// Note that this does not follow symbolic links.
     #[inline]
     fn is_dir(&self) -> bool {
-        self.is_dir()
+        self.metadata.is_dir()
     }
 
     /// Returns `true` if the path is pointing at a regular file.
@@ -239,7 +221,7 @@ impl AsPath for Entry {
     /// Note that this does not follow symbolic links.
     #[inline]
     fn is_file(&self) -> bool {
-        self.is_file()
+        self.metadata.is_file()
     }
 
     /// Returns `true` if the path is pointing at a symbolic link.
@@ -248,7 +230,7 @@ impl AsPath for Entry {
     /// over time.
     #[inline]
     fn is_symlink(&self) -> bool {
-        self.is_symlink()
+        self.metadata.is_symlink()
     }
 }
 
