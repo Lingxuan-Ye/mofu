@@ -149,24 +149,18 @@ impl Entry {
     ///
     /// Due to possible concurrent file access, the cached metadata may degrade in
     /// validity over time.
-    ///
-    /// Note that the metadata does not follow symbolic links.
     #[inline]
     pub fn metadata(&self) -> &Metadata {
         &self.metadata
     }
 
     /// Returns `true` if the cached metadata is for a directory.
-    ///
-    /// Note that this will be `false` for symbolic links.
     #[inline]
     pub fn is_dir(&self) -> bool {
         self.metadata.is_dir()
     }
 
     /// Returns `true` if the cached metadata is for a regular file.
-    ///
-    /// Note that this will be `false` for symbolic links.
     #[inline]
     pub fn is_file(&self) -> bool {
         self.metadata.is_file()
@@ -214,23 +208,44 @@ impl AsPath for Entry {
         self.path()
     }
 
-    /// Returns `true` if the cached metadata is for a directory.
+    /// Returns `true` unconditionally.
     ///
-    /// Note that this will be `false` for symbolic links.
+    /// Due to possible concurrent file access, the result may degrade in validity
+    /// over time.
+    ///
+    /// Note that this does not follow symbolic links.
+    #[inline]
+    fn exists(&self) -> bool {
+        true
+    }
+
+
+    /// Returns `true` if the path is pointing at a directory.
+    ///
+    /// Due to possible concurrent file access, the result may degrade in validity
+    /// over time.
+    ///
+    /// Note that this does not follow symbolic links.
     #[inline]
     fn is_dir(&self) -> bool {
         self.is_dir()
     }
 
-    /// Returns `true` if the cached metadata is for a regular file.
+    /// Returns `true` if the path is pointing at a regular file.
     ///
-    /// Note that this will be `false` for symbolic links.
+    /// Due to possible concurrent file access, the result may degrade in validity
+    /// over time.
+    ///
+    /// Note that this does not follow symbolic links.
     #[inline]
     fn is_file(&self) -> bool {
         self.is_file()
     }
 
-    /// Returns `true` if the cached metadata is for a symbolic link.
+    /// Returns `true` if the path is pointing at a symbolic link.
+    ///
+    /// Due to possible concurrent file access, the result may degrade in validity
+    /// over time.
     #[inline]
     fn is_symlink(&self) -> bool {
         self.is_symlink()
