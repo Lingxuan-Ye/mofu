@@ -1,9 +1,10 @@
 //! Tools for directory traversal.
 
-use crate::path::{AsPath, Path, PathBuf};
-use std::fs::{DirEntry, Metadata, ReadDir, read_dir};
+use std::fs;
+use std::fs::{DirEntry, Metadata, ReadDir};
 use std::io::{Error, ErrorKind, Result};
 use std::num::NonZero;
+use std::path::{Path, PathBuf};
 
 /// Returns an iterator that recursively traverses the specified directory.
 ///
@@ -72,10 +73,10 @@ impl WalkDir {
     /// - The `path` points at a non-directory file.
     pub fn new<P>(path: P) -> Result<Self>
     where
-        P: AsPath,
+        P: AsRef<Path>,
     {
         let depth = unsafe { NonZero::new_unchecked(1) };
-        let iter = read_dir(path.as_path())?;
+        let iter = fs::read_dir(path)?;
         let item = StackItem { depth, iter };
         let stack = vec![item];
         let max_depth = None;
@@ -107,8 +108,8 @@ impl Iterator for WalkDir {
             Ok(entry) => entry,
         };
 
-        if entry.is_dir() && self.max_depth.is_none_or(|max_depth| depth < max_depth) {
-            match read_dir(entry.path()) {
+        if entry.metadata.is_dir() && self.max_depth.is_none_or(|max_depth| depth < max_depth) {
+            match fs::read_dir(entry.path()) {
                 // Yes, this branch is still reachable.
                 Err(error) if error.kind() == ErrorKind::NotADirectory => (),
                 Err(error) => return Some(Err(error)),
@@ -181,56 +182,6 @@ impl From<Entry> for PathBuf {
     #[inline]
     fn from(value: Entry) -> Self {
         value.path
-    }
-}
-
-impl AsPath for Entry {
-    #[inline]
-    fn as_path(&self) -> &Path {
-        self.path()
-    }
-
-    /// Returns `true` unconditionally.
-    ///
-    /// Due to possible concurrent file access, the result may degrade in validity
-    /// over time.
-    ///
-    /// Note that this does not follow symbolic links.
-    #[inline]
-    fn exists(&self) -> bool {
-        true
-    }
-
-
-    /// Returns `true` if the path is pointing at a directory.
-    ///
-    /// Due to possible concurrent file access, the result may degrade in validity
-    /// over time.
-    ///
-    /// Note that this does not follow symbolic links.
-    #[inline]
-    fn is_dir(&self) -> bool {
-        self.metadata.is_dir()
-    }
-
-    /// Returns `true` if the path is pointing at a regular file.
-    ///
-    /// Due to possible concurrent file access, the result may degrade in validity
-    /// over time.
-    ///
-    /// Note that this does not follow symbolic links.
-    #[inline]
-    fn is_file(&self) -> bool {
-        self.metadata.is_file()
-    }
-
-    /// Returns `true` if the path is pointing at a symbolic link.
-    ///
-    /// Due to possible concurrent file access, the result may degrade in validity
-    /// over time.
-    #[inline]
-    fn is_symlink(&self) -> bool {
-        self.metadata.is_symlink()
     }
 }
 
