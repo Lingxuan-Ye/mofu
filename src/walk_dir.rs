@@ -1,7 +1,7 @@
 //! Tools for directory traversal.
 
 use std::fs;
-use std::fs::{DirEntry, Metadata, ReadDir};
+use std::fs::{Metadata, ReadDir};
 use std::io::{Error, ErrorKind, Result};
 use std::num::NonZero;
 use std::path::{Path, PathBuf};
@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 /// - The provided `path` doesn't exist.
 /// - The process lacks permissions to view the contents.
 /// - The `path` points at a non-directory file.
-pub fn walk_dir<P>(path: P, max_depth: usize) -> Result<impl Iterator<Item = Entry>>
+pub fn walk_dir<P>(path: P, max_depth: usize) -> Result<impl Iterator<Item = DirEntry>>
 where
     P: AsRef<Path>,
 {
@@ -91,7 +91,7 @@ impl WalkDir {
 }
 
 impl Iterator for WalkDir {
-    type Item = Result<Entry>;
+    type Item = Result<DirEntry>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let (depth, entry) = loop {
@@ -103,7 +103,7 @@ impl Iterator for WalkDir {
             };
         };
 
-        let entry = match Entry::try_from(entry) {
+        let entry = match DirEntry::try_from(entry) {
             Err(error) => return Some(Err(error)),
             Ok(entry) => entry,
         };
@@ -134,12 +134,12 @@ impl Iterator for WalkDir {
 ///
 /// Note that the metadata does not follow symbolic links.
 #[derive(Debug)]
-pub struct Entry {
+pub struct DirEntry {
     path: PathBuf,
     metadata: Metadata,
 }
 
-impl Entry {
+impl DirEntry {
     /// Returns the path.
     #[inline]
     pub fn path(&self) -> &Path {
@@ -156,18 +156,18 @@ impl Entry {
     }
 }
 
-impl TryFrom<DirEntry> for Entry {
+impl TryFrom<fs::DirEntry> for DirEntry {
     type Error = Error;
 
     #[inline]
-    fn try_from(value: DirEntry) -> Result<Self> {
+    fn try_from(value: fs::DirEntry) -> Result<Self> {
         let path = value.path();
         let metadata = value.metadata()?;
         Ok(Self { path, metadata })
     }
 }
 
-impl TryFrom<PathBuf> for Entry {
+impl TryFrom<PathBuf> for DirEntry {
     type Error = Error;
 
     #[inline]
@@ -178,9 +178,9 @@ impl TryFrom<PathBuf> for Entry {
     }
 }
 
-impl From<Entry> for PathBuf {
+impl From<DirEntry> for PathBuf {
     #[inline]
-    fn from(value: Entry) -> Self {
+    fn from(value: DirEntry) -> Self {
         value.path
     }
 }
