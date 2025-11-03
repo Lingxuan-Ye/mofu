@@ -1,4 +1,4 @@
-//! Tools for directory traversal.
+//! Utilities for directory traversal.
 
 use std::fs;
 use std::fs::{Metadata, ReadDir};
