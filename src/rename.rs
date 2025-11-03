@@ -24,7 +24,6 @@ impl RenameQueue {
         let iter = iter.into_iter();
         let capacity = iter.size_hint().0;
         let mut map = HashMap::with_capacity(capacity);
-        let mut self_loop_count = 0;
 
         for (src, dst) in iter {
             let src = path::absolute(src).map(Rc::new)?;
@@ -40,18 +39,14 @@ impl RenameQueue {
                     return Err(Error::OneToMany { src, dst });
                 }
                 Entry::Vacant(entry) => {
-                    if entry.key() == &dst {
-                        self_loop_count += 1;
-                    }
                     entry.insert(dst);
                 }
             }
         }
 
-        let capacity = map.len();
+        let mut capacity = map.len();
         let mut rev_map = HashMap::with_capacity(capacity);
-        let mut srcs = Vec::with_capacity(capacity);
-        let mut dsts = Vec::with_capacity(capacity);
+        let mut paths = Vec::with_capacity(capacity);
 
         for (src, dst) in map.iter() {
             match rev_map.entry(dst) {
@@ -65,36 +60,30 @@ impl RenameQueue {
                     entry.insert(src);
                 }
             }
-            srcs.push(src);
-            dsts.push(dst);
+            if src == dst {
+                capacity -= 1;
+            } else {
+                paths.push(src);
+                paths.push(dst);
+            }
         }
         drop(rev_map);
 
-        srcs.sort();
-        for window in srcs.windows(2) {
+        paths.sort();
+        for window in paths.windows(2) {
             let lower = window[0];
             let upper = window[1];
             if upper.starts_with(lower.as_path()) {
                 let node = Rc::clone(lower);
                 let child = Rc::clone(upper);
-                return Err(Error::NonLeafNodeSrc { node, child });
+                return Err(Error::NonLeafNode {
+                    node,
+                    descendant: child,
+                });
             }
         }
-        drop(srcs);
+        drop(paths);
 
-        dsts.sort();
-        for window in dsts.windows(2) {
-            let lower = window[0];
-            let upper = window[1];
-            if upper.starts_with(lower.as_path()) {
-                let node = Rc::clone(lower);
-                let child = Rc::clone(upper);
-                return Err(Error::NonLeafNodeDst { node, child });
-            }
-        }
-        drop(dsts);
-
-        let capacity = map.len() - self_loop_count;
         let mut visited = HashSet::with_capacity(capacity);
         // In the extreme case where every two mappings form a cycle, one
         // extra slot is needed for each temporary path.
@@ -268,14 +257,9 @@ pub enum Error {
         dst: Rc<PathBuf>,
     },
 
-    NonLeafNodeSrc {
+    NonLeafNode {
         node: Rc<PathBuf>,
-        child: Rc<PathBuf>,
-    },
-
-    NonLeafNodeDst {
-        node: Rc<PathBuf>,
-        child: Rc<PathBuf>,
+        descendant: Rc<PathBuf>,
     },
 
     AlreadyExists {
@@ -297,7 +281,7 @@ impl From<io::Error> for Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const INDENT: &str = "    ";
+        const INDENT: &str = "  ";
 
         match self {
             Self::Io(error) => {
@@ -306,34 +290,31 @@ impl fmt::Display for Error {
 
             Self::OneToMany { src, dst } => {
                 writeln!(f, "multiple destinations detected:")?;
-                writeln!(f, "{INDENT}src: {}", src.display())?;
-                writeln!(f, "{INDENT}dst: {}", dst.0.display())?;
-                writeln!(f, "{INDENT}     {}", dst.1.display())?;
+                writeln!(f, "{INDENT}     source {}", src.display())?;
+                writeln!(f, "{INDENT}destination {}", dst.0.display())?;
+                writeln!(f, "{INDENT}            {}", dst.1.display())?;
             }
 
             Self::ManyToOne { src, dst } => {
                 writeln!(f, "collision detected:")?;
-                writeln!(f, "{INDENT}src: {}", src.0.display())?;
-                writeln!(f, "{INDENT}     {}", src.1.display())?;
-                writeln!(f, "{INDENT}dst: {}", dst.display())?;
+                writeln!(f, "{INDENT}     source {}", src.0.display())?;
+                writeln!(f, "{INDENT}            {}", src.1.display())?;
+                writeln!(f, "{INDENT}destination {}", dst.display())?;
             }
 
-            Self::NonLeafNodeSrc { node, child } => {
-                writeln!(f, "non-leaf node source:")?;
-                writeln!(f, "{INDENT}node:  {}", node.display())?;
-                writeln!(f, "{INDENT}child: {}", child.display())?;
-            }
-
-            Self::NonLeafNodeDst { node, child } => {
-                writeln!(f, "non-leaf node destination:")?;
-                writeln!(f, "{INDENT}node:  {}", node.display())?;
-                writeln!(f, "{INDENT}child: {}", child.display())?;
+            Self::NonLeafNode {
+                node,
+                descendant: child,
+            } => {
+                writeln!(f, "non-leaf node detected:")?;
+                writeln!(f, "{INDENT}       node {}", node.display())?;
+                writeln!(f, "{INDENT} descendant {}", child.display())?;
             }
 
             Self::AlreadyExists { src, dst } => {
                 writeln!(f, "destination already exists:")?;
-                writeln!(f, "{INDENT}src: {}", src.display())?;
-                writeln!(f, "{INDENT}dst: {}", dst.display())?;
+                writeln!(f, "{INDENT}     source {}", src.display())?;
+                writeln!(f, "{INDENT}destination {}", dst.display())?;
             }
 
             Self::AtomicActionFailed {
