@@ -8,6 +8,7 @@ use std::path;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+/// A queue for batch renaming operations.
 #[derive(Debug)]
 pub struct RenameQueue {
     queue: Vec<Mapping>,
@@ -15,6 +16,34 @@ pub struct RenameQueue {
 }
 
 impl RenameQueue {
+    /// Creates a new [`RenameQueue`] from an iterator over source–destination
+    /// mapping pairs.
+    ///
+    /// The renaming order is not determined by the given iterator. To see the
+    /// exact execution order, use [`RenameQueue::pending`].
+    ///
+    /// # Panics
+    ///
+    /// May panic if any path is empty.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::Io`] if an I/O error occurs.
+    /// - [`Error::OneToMany`] if a single source maps to multiple destinations.
+    /// - [`Error::ManyToOne`] if multiple sources map to the same destination.
+    /// - [`Error::NonLeafNode`] if any two paths have an ancestor–descendant
+    ///   relationship, regardless of whether they are sources or destinations.
+    ///
+    /// On case-insensitive file systems, [`Error::OneToMany`] and [`Error::ManyToOne`]
+    /// are not detected for paths that differ only in letter case. However, the
+    /// renaming process will stop at such conflicts. If no concurrent file access
+    /// occurs, it can be safely reverted.
+    ///
+    /// If any path has a symlink ancestor, or contains `..`, [`Error::NonLeafNode`]
+    /// may not be detected. In that case, the renaming process is considered to
+    /// be in an ambiguous state and may or may not stop executing. Regardless,
+    /// the execution is considered incorrect. If no concurrent file access occurs,
+    /// it can be safely reverted.
     pub fn new<I, S, D>(iter: I) -> Result<Self, Error>
     where
         I: IntoIterator<Item = (S, D)>,
@@ -143,6 +172,14 @@ impl RenameQueue {
         Ok(Self { queue, renamed })
     }
 
+    /// Renames the pending mappings atomically.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::AlreadyExists`] if any destination already exists.
+    /// - [`Error::Io`] if an I/O error occurs.
+    /// - [`Error::AtomicActionFailed`] if the rename attempt fails and the
+    ///   subsequent rollback also fails.
     pub fn rename_atomic(&mut self) -> Result<&mut Self, Error> {
         if let Err(rename_error) = self.rename() {
             if let Err(revert_error) = self.revert() {
@@ -158,6 +195,14 @@ impl RenameQueue {
         }
     }
 
+    /// Reverts the renamed mappings atomically.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::AlreadyExists`] if any destination already exists.
+    /// - [`Error::Io`] if an I/O error occurs.
+    /// - [`Error::AtomicActionFailed`] if the revert attempt fails and the
+    ///   subsequent rollback also fails.
     pub fn revert_atomic(&mut self) -> Result<&mut Self, Error> {
         if let Err(revert_error) = self.revert() {
             if let Err(rename_error) = self.rename() {
@@ -173,6 +218,12 @@ impl RenameQueue {
         }
     }
 
+    /// Renames the pending mappings.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::AlreadyExists`] if any destination already exists.
+    /// - [`Error::Io`] if an I/O error occurs.
     pub fn rename(&mut self) -> Result<&mut Self, Error> {
         for mapping in self.queue.iter().skip(self.renamed) {
             mapping.rename()?;
@@ -181,6 +232,12 @@ impl RenameQueue {
         Ok(self)
     }
 
+    /// Reverts the renamed mappings.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::AlreadyExists`] if any destination already exists.
+    /// - [`Error::Io`] if an I/O error occurs.
     pub fn revert(&mut self) -> Result<&mut Self, Error> {
         for mapping in self
             .queue
@@ -195,17 +252,20 @@ impl RenameQueue {
         Ok(self)
     }
 
+    /// Returns the renamed mappings.
     #[inline]
     pub fn renamed(&self) -> &[Mapping] {
         &self.queue[..self.renamed]
     }
 
+    /// Returns the pending mappings.
     #[inline]
     pub fn pending(&self) -> &[Mapping] {
         &self.queue[self.renamed..]
     }
 }
 
+/// A struct representing a single source-destination mapping.
 #[derive(Debug)]
 pub struct Mapping {
     src: Rc<PathBuf>,
@@ -213,11 +273,13 @@ pub struct Mapping {
 }
 
 impl Mapping {
+    /// Returns the source.
     #[inline]
     pub fn src(&self) -> &Path {
         self.src.as_path()
     }
 
+    /// Returns the destination.
     #[inline]
     pub fn dst(&self) -> &Path {
         self.dst.as_path()
@@ -243,6 +305,7 @@ impl Mapping {
     }
 }
 
+/// A enum for error handling.
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
