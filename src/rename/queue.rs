@@ -1,12 +1,23 @@
 use super::error::Error;
 use super::mapping::Mapping;
+use serde::de::{Deserialize, Deserializer, Error as DeError, MapAccess, Visitor};
+use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 use std::path;
 use std::path::Path;
 use std::rc::Rc;
 
 /// A queue for batch renaming operations.
+///
+/// # Serialization & Deserialization
+///
+/// This type implements [`Serialize`] and [`Deserialize`]. Notably, the
+/// [`Deserialize`] implementation preserves the renaming order as-is. If
+/// the serialized output is modified or reordered, or if any relevant files
+/// are added, removed, or moved, it will no longer be possible to revert
+/// to the initial state.
 #[derive(Debug)]
 pub struct RenameQueue {
     queue: Vec<Mapping>,
@@ -260,5 +271,110 @@ impl RenameQueue {
     #[inline]
     pub fn pending(&self) -> &[Mapping] {
         &self.queue[self.renamed..]
+    }
+}
+
+const FIELDS: &[&str] = &["renamed", "pending"];
+
+impl Serialize for RenameQueue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut queue = serializer.serialize_struct("RenameQueue", 2)?;
+        queue.serialize_field("renamed", self.renamed())?;
+        queue.serialize_field("pending", self.pending())?;
+        queue.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for RenameQueue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_struct("RenameQueue", FIELDS, RenameQueueVisitor)
+    }
+}
+
+#[derive(Debug)]
+struct RenameQueueVisitor;
+
+impl<'de> Visitor<'de> for RenameQueueVisitor {
+    type Value = RenameQueue;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("struct RenameQueue")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut renamed: Option<Vec<Mapping>> = None;
+        let mut pending: Option<Vec<Mapping>> = None;
+
+        while let Some(key) = map.next_key()? {
+            match key {
+                Field::Renamed => {
+                    if renamed.is_some() {
+                        return Err(DeError::duplicate_field("renamed"));
+                    }
+                    renamed = Some(map.next_value()?);
+                }
+                Field::Pending => {
+                    if pending.is_some() {
+                        return Err(DeError::duplicate_field("pending"));
+                    }
+                    pending = Some(map.next_value()?);
+                }
+            }
+        }
+
+        let renamed = renamed.ok_or_else(|| DeError::missing_field("renamed"))?;
+        let pending = pending.ok_or_else(|| DeError::missing_field("pending"))?;
+
+        let mut queue = renamed;
+        let renamed = queue.len();
+        queue.extend(pending);
+
+        Ok(RenameQueue { queue, renamed })
+    }
+}
+
+#[derive(Debug)]
+enum Field {
+    Renamed,
+    Pending,
+}
+
+impl<'de> Deserialize<'de> for Field {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_identifier(FieldVisitor)
+    }
+}
+
+#[derive(Debug)]
+struct FieldVisitor;
+
+impl Visitor<'_> for FieldVisitor {
+    type Value = Field;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("`renamed` or `pending`")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        match value {
+            "renamed" => Ok(Field::Renamed),
+            "pending" => Ok(Field::Pending),
+            _ => Err(DeError::unknown_field(value, FIELDS)),
+        }
     }
 }

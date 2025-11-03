@@ -7,3 +7,6 @@ repository = "https://github.com/Lingxuan-Ye/mofu"
 readme = "README.md"
 license = "MIT"
 description = "More optimistic file utilities."
+
+[dependencies]
+serde = "1.0.228"
