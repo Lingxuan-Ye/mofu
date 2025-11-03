@@ -111,13 +111,12 @@ impl RenameQueue {
         for window in paths.windows(2) {
             let lower = window[0];
             let upper = window[1];
-            if upper.starts_with(lower.as_path()) {
+            if upper.as_os_str().len() != lower.as_os_str().len()
+                && upper.starts_with(lower.as_path())
+            {
                 let node = Rc::clone(lower);
-                let child = Rc::clone(upper);
-                return Err(Error::NonLeafNode {
-                    node,
-                    descendant: child,
-                });
+                let descendant = Rc::clone(upper);
+                return Err(Error::NonLeafNode { node, descendant });
             }
         }
         drop(paths);
