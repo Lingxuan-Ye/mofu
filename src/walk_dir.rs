@@ -132,7 +132,7 @@ impl Iterator for WalkDir {
 /// redundant system calls. However, due to possible concurrent file access,
 /// the cached metadata may degrade in validity over time.
 ///
-/// Note that the metadata does not follow symbolic links.
+/// Note that the metadata does not follow symlinks.
 #[derive(Debug)]
 pub struct DirEntry {
     path: PathBuf,
@@ -150,6 +150,8 @@ impl DirEntry {
     ///
     /// Due to possible concurrent file access, the cached metadata may degrade in
     /// validity over time.
+    ///
+    /// Note that the metadata does not follow symbolic links.
     #[inline]
     pub fn metadata(&self) -> &Metadata {
         &self.metadata
