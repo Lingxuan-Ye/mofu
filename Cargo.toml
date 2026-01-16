@@ -2,7 +2,7 @@
 name = "mofu"
 version = "0.1.1"
 edition = "2024"
-authors = ["Lingxuan Ye <love@lingxuan.io>"]
+authors = ["Lingxuan Ye <ink@lingxuan.io>"]
 repository = "https://github.com/Lingxuan-Ye/mofu"
 readme = "README.md"
 license = "MIT"
