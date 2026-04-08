@@ -86,7 +86,7 @@ impl RenameQueue {
         let mut rev_map = HashMap::with_capacity(capacity);
         let mut paths = Vec::with_capacity(capacity);
 
-        for (src, dst) in map.iter() {
+        for (src, dst) in &map {
             match rev_map.entry(dst) {
                 Entry::Occupied(entry) => {
                     let collided = entry.remove();
@@ -131,7 +131,7 @@ impl RenameQueue {
         // a complete component, which does not affect correctness.
         let mut walk = VecDeque::with_capacity(capacity + 1);
 
-        for (src, dst) in map.iter() {
+        for (src, dst) in &map {
             if src == dst || visited.contains(src.as_path()) {
                 continue;
             }
